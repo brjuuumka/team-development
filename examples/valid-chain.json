@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "blocks": [
+    {
+      "schema_version": 1,
+      "index": 0,
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "records": [],
+      "hash": "15b9cf17589776e821fa5cfafd32bb3ba503803d4cd59cb68c1b8413974b6571"
+    },
+    {
+      "schema_version": 1,
+      "index": 1,
+      "timestamp": "2026-09-24T09:00:00.000Z",
+      "previous_hash": "15b9cf17589776e821fa5cfafd32bb3ba503803d4cd59cb68c1b8413974b6571",
+      "records": [
+        {
+          "schema_version": 1,
+          "record_id": "44444444-4444-4444-8444-444444444444",
+          "prescription_id": "11111111-1111-4111-8111-111111111111",
+          "event_type": "ISSUED",
+          "actor_id": "22222222-2222-4222-8222-222222222222",
+          "created_at": "2026-09-24T09:00:00.000Z",
+          "document_ref": "55555555-5555-4555-8555-555555555555",
+          "document_hash": "c0854be50928aee0dc809ec4233002df0ae160a1e34d880e03f2eaeb15d5dd3c"
+        }
+      ],
+      "hash": "3b71b8b4be9fb2c73b3757a50abb38f9a61991207216890ad0c55743d92c9e36"
+    }
+  ]
+}
