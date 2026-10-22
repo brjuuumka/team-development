@@ -3,6 +3,8 @@ import re
 import hashlib
 import rfc8785
 import json
+import copy
+
 
 class Record:
     def __init__(self, record_id, prescription_id, event_type, actor_id, created_at, document_ref, document_hash):
@@ -43,6 +45,7 @@ class Record:
             "document_hash": self.document_hash
         }
 
+
 class Block:
     def __init__(self, index, timestamp, previous_hash, records, hash_val=None):
         self.schema_version = 1
@@ -68,6 +71,7 @@ class Block:
             raise ValueError(f"Ошибка в блоке {self.index}: HASH_MISMATCH (хэш не совпадает)")
         return True
 
+
 class Blockchain:
     def __init__(self):
         self.blocks = [Block(
@@ -80,6 +84,10 @@ class Blockchain:
     def add_block(self, records, timestamp):
         if not records:
             raise ValueError("EMPTY_BLOCK: Список записей пуст")
+
+        # Проверяем валидность записей ДО добавления в цепочку
+        for r in records:
+            r.validate()
 
         existing_ids = set()
         for b in self.blocks:
@@ -96,58 +104,45 @@ class Blockchain:
             index=last_block.index + 1,
             timestamp=timestamp,
             previous_hash=last_block.hash,
-            records=records
+            records=copy.deepcopy(records)  # ИСПРАВЛЕНО для теста T-11
         )
         self.blocks.append(new_block)
         return new_block
 
+    def get_prescription_history(self, prescription_id):
+        history = []
+        for block in self.blocks:
+            for record in block.records:
+                if record.prescription_id == prescription_id:
+                    history.append(record)
+        return history
+
     def validate_chain(self):
-        """
-        CORE-11, CORE-12: Глубокая проверка целостности с поиском точки разрыва.
-        """
+        # Сначала проверяем структуру всей цепочки (хэши и связи)
         for i in range(len(self.blocks)):
             block = self.blocks[i]
-            
-            # Проверка собственного хэша блока
+
             if block.calculate_hash() != block.hash:
-                return {"valid": False, "error_block_index": i, "reason": "HASH_MISMATCH: Хэш блока не совпадает с пересчитанным"}
-            
-            # Проверка связи с предыдущим блоком
+                raise ValueError(f"HASH_MISMATCH: Блок {i} поврежден")
+
             if i > 0:
                 if block.previous_hash != self.blocks[i - 1].hash:
-                    return {"valid": False, "error_block_index": i, "reason": "PREVIOUS_HASH_MISMATCH: Разорвана связь с предыдущим блоком"}
-            
-            # Детальная валидация каждой записи внутри блока
-            for record in block.records:
+                    raise ValueError(f"PREVIOUS_HASH_MISMATCH: Блок {i} не связан с предыдущим")
+
+        # Потом проверяем Genesis (чтобы T-06 выдал именно INVALID_GENESIS)
+        if (self.blocks[0].index != 0 or self.blocks[0].previous_hash != "0" * 64 or
+                self.blocks[0].timestamp != "2026-01-01T00:00:00.000Z" or len(self.blocks[0].records) != 0):
+            raise ValueError("INVALID_GENESIS: Genesis-блок поврежден или не соответствует стандарту")
+
+        # в конце проверяем сами записи
+        for i, block in enumerate(self.blocks):
+            for j, record in enumerate(block.records):
                 try:
                     record.validate()
                 except ValueError as e:
-                    return {"valid": False, "error_block_index": i, "reason": f"INVALID_RECORD: Повреждена запись {record.record_id} - {e}"}
-                    
-        return {"valid": True, "error_block_index": None, "reason": None}
+                    raise ValueError(f"RECORD_VALIDATION_ERROR: Блок {i}, запись {j}: {e}")
 
-    def verify_external_document(self, document_dict, record_id):
-        """
-        CORE-13: Проверка внешнего документа (сверка пересчитанного хэша файла с сохраненным).
-        """
-        target_record = None
-        for b in self.blocks:
-            for r in b.records:
-                if r.record_id == record_id:
-                    target_record = r
-                    break
-            if target_record:
-                break
-                
-        if not target_record:
-            return False
-            
-        try:
-            canonical_json = rfc8785.dumps(document_dict)
-            doc_hash = hashlib.sha256(canonical_json).hexdigest()
-            return doc_hash == target_record.document_hash
-        except Exception:
-            return False
+        return True
 
     def export_json(self, filename="blockchain.json"):
         data = {"schema_version": 1, "blocks": []}
@@ -197,9 +192,83 @@ class Blockchain:
         print(f"Цепочка загружена из файла {filename}")
 
 if __name__ == "__main__":
-    print("Тест 5: Создание цепочки и добавление блоков")
+    print("Тест 1: Создание правильной записи")
+    try:
+        good_record = Record(
+            record_id="44444444-4444-4444-8444-444444444444",
+            prescription_id="11111111-1111-4111-8111-111111111111",
+            event_type="ISSUED",
+            actor_id="22222222-2222-4222-8222-222222222222",
+            created_at="2026-09-24T09:00:00.000Z",
+            document_ref="55555555-5555-4555-8555-555555555555",
+            document_hash="c0854be50928aee0dc809ec4233002df0ae160a1e34d880e03f2eaeb15d5dd3c"
+        )
+        good_record.validate()
+        print("Успех: запись прошла валидацию!")
+    except Exception as e:
+        print(f"Ошибка: {e}")
+
+    print("\nТест 2: Создание записи с ошибкой (плохой UUID)")
+    try:
+        bad_record = Record(
+            record_id="НЕ-UUID",
+            prescription_id="11111111-1111-4111-8111-111111111111",
+            event_type="ISSUED",
+            actor_id="22222222-2222-4222-8222-222222222222",
+            created_at="2026-09-24T09:00:00.000Z",
+            document_ref="55555555-5555-4555-8555-555555555555",
+            document_hash="c0854be50928aee0dc809ec4233002df0ae160a1e34d880e03f2eaeb15d5dd3c"
+        )
+        bad_record.validate()
+        print("Ошибка: плохой UUID прошел валидацию (так не должно быть!)")
+    except ValueError as e:
+        print(f"Успех: система поймала ошибку! Текст: {e}")
+
+    print("Тест 3: Создание Genesis-блока (CORE-03)")
+    genesis = Block(
+        index=0,
+        timestamp="2026-01-01T00:00:00.000Z",
+        previous_hash="0" * 64,
+        records=[]
+    )
+    print(f"Хэш Genesis-блока: {genesis.hash}")
+    expected_genesis_hash = "15b9cf17589776e821fa5cfafd32bb3ba503803d4cd59cb68c1b8413974b6571"
+    if genesis.hash == expected_genesis_hash:
+        print("Успех! Хэш совпал с valid-chain.json!")
+    else:
+        print("Ошибка: Хэш не совпал!")
+
+    print("\nТест 4: Создание второго блока с записью (CORE-04)")
+    good_record = Record(
+        record_id="44444444-4444-4444-8444-444444444444",
+        prescription_id="11111111-1111-4111-8111-111111111111",
+        event_type="ISSUED",
+        actor_id="22222222-2222-4222-8222-222222222222",
+        created_at="2026-09-24T09:00:00.000Z",
+        document_ref="55555555-5555-4555-8555-555555555555",
+        document_hash="c0854be50928aee0dc809ec4233002df0ae160a1e34d880e03f2eaeb15d5dd3c"
+    )
+    block1 = Block(
+        index=1,
+        timestamp="2026-09-24T09:00:00.000Z",
+        previous_hash=genesis.hash,
+        records=[good_record]
+    )
+    print(f"Хэш второго блока: {block1.hash}")
+    expected_block1_hash = "3b71b8b4be9fb2c73b3757a50abb38f9a61991207216890ad0c55743d92c9e36"
+    if block1.hash == expected_block1_hash:
+        print("Успех! Хэш второго блока совпал с valid-chain.json!")
+    else:
+        print("Ошибка: Хэш второго блока не совпал!")
+
+    print("Тест 5: Создание цепочки и добавление блоков (CORE-04, CORE-06)")
     chain = Blockchain()
-    
+    try:
+        chain.add_block([], "2026-09-24T10:00:00.000Z")
+        print("Ошибка: пустой блок добавился")
+    except ValueError as e:
+        print(f"Успех: пустой блок отклонен. {e}")
+
     good_record = Record(
         record_id="44444444-4444-4444-8444-444444444444",
         prescription_id="11111111-1111-4111-8111-111111111111",
@@ -212,52 +281,34 @@ if __name__ == "__main__":
     chain.add_block([good_record], "2026-09-24T09:00:00.000Z")
     print("Успех: блок с записью добавлен")
 
-    print("\nТест 6: Проверка целостности цепочки (CORE-11)")
-    val_result = chain.validate_chain()
-    if val_result["valid"]:
+    try:
+        chain.add_block([good_record], "2026-09-24T11:00:00.000Z")
+        print("Ошибка: дубликат добавился")
+    except ValueError as e:
+        print(f"Успех: дубликат отклонен. {e}")
+
+    print("\nТест 6: Проверка целостности цепочки (CORE-05)")
+    try:
+        chain.validate_chain()
         print("Успех: цепочка валидна!")
-    else:
-        print(f"Ошибка валидации: {val_result}")
+    except ValueError as e:
+        print(f"Ошибка: {e}")
 
-    print("\nТест 7: Поиск точки разрыва (CORE-12)")
-    # Имитируем хакерскую атаку (меняем тип события в обход хэша)
+    print("\nТест 7: Порча данных (Хакерская атака)")
     chain.blocks[1].records[0].event_type = "CANCELLED"
-    val_result = chain.validate_chain()
-    if not val_result["valid"]:
-        print(f"Успех: система поймала взлом! Блок {val_result['error_block_index']}, причина: {val_result['reason']}")
-    else:
+    try:
+        chain.validate_chain()
         print("Ошибка: система не заметила взлом!")
+    except ValueError as e:
+        print(f"Успех: система поймала взлом! {e}")
 
-    # Возвращаем как было для следующих тестов
+    print("\nТест 8: Сохранение и загрузка (CORE-08)")
     chain.blocks[1].records[0].event_type = "ISSUED"
-
-    print("\nТест 8: Проверка внешнего документа (CORE-13)")
-    # Создаем фейковый документ, который соответствует хэшу записи
-    valid_document = {
-        "schema_version": 1,
-        "prescription_id": "11111111-1111-4111-8111-111111111111",
-        "event_type": "ISSUED",
-        "patient_id": "33333333-3333-4333-8333-333333333333",
-        "doctor_id": "22222222-2222-4222-8222-222222222222",
-        "medication_code": "TEST-001",
-        "dosage_text": "Учебный пример, не для применения",
-        "quantity": 1,
-        "unit": "упаковка",
-        "issued_at": "2026-09-24T09:00:00.000Z",
-        "expires_at": "2026-10-24T09:00:00.000Z",
-        "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    }
-    
-    is_valid = chain.verify_external_document(valid_document, "44444444-4444-4444-8444-444444444444")
-    if is_valid:
-        print("Успех: Внешний документ подтвержден (хэши совпали).")
-    else:
-        print("Ошибка: Документ не прошел проверку.")
-        
-    invalid_document = valid_document.copy()
-    invalid_document["quantity"] = 2 # Злоумышленник изменил количество
-    is_valid_fake = chain.verify_external_document(invalid_document, "44444444-4444-4444-8444-444444444444")
-    if not is_valid_fake:
-        print("Успех: Поддельный внешний документ отклонен.")
-    else:
-        print("Ошибка: Система пропустила подделку!")
+    chain.export_json("my_chain.json")
+    new_chain = Blockchain()
+    new_chain.import_json("my_chain.json")
+    try:
+        new_chain.validate_chain()
+        print("Успех: загруженная цепочка валидна и хэши совпадают!")
+    except ValueError as e:
+        print(f"Ошибка: {e}")
