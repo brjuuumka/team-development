@@ -1,6 +1,4 @@
-"""Sprint 2 QA: cases T-01–T-12 from docs/test-plan.md.
-Run from repository root: python -m unittest discover -s tests -v
-"""
+
 import copy
 import json
 import re
