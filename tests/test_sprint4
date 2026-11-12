@@ -1,0 +1,141 @@
+
+import copy
+import pytest
+
+from node import Node, block_to_dict
+
+
+@pytest.fixture
+def nodes(tmp_path):
+    node1 = Node("node-1", tmp_path / "node1.json")
+    node2 = Node("node-2", tmp_path / "node2.json")
+    return node1, node2
+
+
+def test_01_independent_nodes(nodes):
+    a, b = nodes
+    a.create({})
+    assert a.status()["height"] == 1
+    assert b.status()["height"] == 0
+
+
+def test_02_node_information(nodes):
+    a, b = nodes
+    assert a.status()["node_id"] == "node-1"
+    assert b.status()["node_id"] == "node-2"
+
+
+def test_03_initial_chain(nodes):
+    a, b = nodes
+    assert a.status()["height"] == 0
+    assert a.status()["last_hash"] == b.status()["last_hash"]
+
+
+def test_04_create_block(nodes):
+    a, b = nodes
+    block = a.create({})
+    assert block["index"] == 1
+    assert a.status()["valid"] is True
+
+
+def test_05_transfer_block(nodes):
+    a, b = nodes
+    block = a.create({})
+    b.accept(block)
+    assert b.status()["height"] == 1
+    assert a.status()["last_hash"] == b.status()["last_hash"]
+
+
+def test_06_multiple_blocks(nodes):
+    a, b = nodes
+    for _ in range(3):
+        block = a.create({})
+        b.accept(block)
+    assert b.status()["height"] == 3
+    assert b.status()["valid"] is True
+
+
+def test_07_invalid_hash(nodes):
+    a, b = nodes
+    block = a.create({})
+    block["hash"] = "f" * 64
+
+    with pytest.raises(ValueError, match="HASH_MISMATCH"):
+        b.accept(block)
+
+
+def test_08_invalid_previous_hash(nodes):
+    a, b = nodes
+    block = a.create({})
+    block["previous_hash"] = "f" * 64
+
+    with pytest.raises(ValueError, match="PREVIOUS_HASH_MISMATCH"):
+        b.accept(block)
+
+
+def test_09_modified_record(nodes):
+    a, b = nodes
+    block = a.create({})
+    block["records"][0]["event_type"] = "CANCELLED"
+
+    with pytest.raises(ValueError, match="RECORD_HASH_MISMATCH"):
+        b.accept(block)
+
+
+def test_10_duplicate_block(nodes):
+    a, b = nodes
+    block = a.create({})
+    b.accept(block)
+
+    with pytest.raises(ValueError, match="DUPLICATE_BLOCK"):
+        b.accept(block)
+
+
+def test_11_missing_intermediate_block(nodes):
+    a, b = nodes
+    a.create({})
+    second = a.create({})
+
+    with pytest.raises(ValueError, match="INDEX_MISMATCH"):
+        b.accept(second)
+
+
+def test_12_incompatible_schema(nodes):
+    a, b = nodes
+    block = a.create({})
+    block["schema_version"] = 999
+
+    with pytest.raises(ValueError, match="UNSUPPORTED_SCHEMA_VERSION"):
+        b.accept(block)
+
+
+def test_13_conflicting_chains(nodes):
+    a, b = nodes
+    a.create({})
+    conflicting = b.create({})
+
+    with pytest.raises(ValueError, match="CHAIN_CONFLICT"):
+        a.accept(conflicting)
+
+
+def test_14_persistent_storage(tmp_path):
+    path = tmp_path / "node.json"
+    a = Node("node-1", path)
+    a.create({})
+
+    restored = Node("node-1", path)
+
+    assert restored.status()["height"] == 1
+    assert restored.status()["last_hash"] == a.status()["last_hash"]
+
+
+def test_15_rejected_block_does_not_change_chain(nodes):
+    a, b = nodes
+    block = copy.deepcopy(a.create({}))
+    block["hash"] = "f" * 64
+
+    with pytest.raises(ValueError):
+        b.accept(block)
+
+    assert b.status()["height"] == 0
+    assert b.status()["valid"] is True
