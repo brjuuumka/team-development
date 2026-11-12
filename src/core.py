@@ -4,7 +4,6 @@ import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
-
 import rfc8785
 
 
