@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Реестр рецептов — нода</title>
+  <style>
+    body { max-width: 720px; margin: 2rem auto; padding: 0 1rem; font: 16px system-ui, sans-serif; color: #172033; }
+    section { margin: 1rem 0; padding: 1rem; border: 1px solid #d9e1ee; border-radius: .5rem; }
+    button, input { padding: .55rem .7rem; font: inherit; } input { min-width: 20rem; }
+    button { cursor: pointer; background: #155eef; color: white; border: 0; border-radius: .3rem; }
+    pre { overflow-wrap: anywhere; white-space: pre-wrap; background: #f5f7fb; padding: .8rem; border-radius: .3rem; }
+    .hint { color: #5a667d; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Реестр рецептов: нода</h1>
+  <p class="hint">Демонстрационный UI. Используйте только синтетические данные.</p>
+  <section><button id="refresh">Обновить состояние</button><pre id="status">Загрузка…</pre></section>
+  <section>
+    <h2>Создать локальный блок</h2>
+    <button id="create">Создать тестовый блок</button>
+  </section>
+  <section>
+    <h2>Получить блок известной ноды</h2>
+    <input id="peer" value="http://127.0.0.1:8001" aria-label="Адрес другой ноды">
+    <input id="index" value="1" type="number" min="0" aria-label="Индекс блока">
+    <button id="pull">Запросить и принять блок</button>
+  </section>
+  <pre id="result" aria-live="polite"></pre>
+  <script>
+    const result = document.querySelector('#result');
+    const show = value => result.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    async function json(url, options) {
+      const response = await fetch(url, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+    async function status() {
+      try { document.querySelector('#status').textContent = JSON.stringify(await json('/v1/node'), null, 2); }
+      catch (error) { show(error.message); }
+    }
+    document.querySelector('#refresh').onclick = status;
+    document.querySelector('#create').onclick = async () => {
+      try { show(await json('/v1/blocks/create', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})); await status(); }
+      catch (error) { show(error.message); }
+    };
+    document.querySelector('#pull').onclick = async () => {
+      try {
+        const peer = document.querySelector('#peer').value.replace(/\/$/, '');
+        const index = document.querySelector('#index').value;
+        const remote = await json(`${peer}/v1/blocks/${index}`);
+        show(await json('/v1/blocks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(remote.block)}));
+        await status();
+      } catch (error) { show(error.message); }
+    };
+    status();
+  </script>
+</body>
+</html>
