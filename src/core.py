@@ -134,7 +134,8 @@ class Blockchain:
                     "reason": "INVALID_GENESIS: цепочка пуста"}
 
         genesis = self.blocks[0]
-        if (genesis.index != 0 or genesis.previous_hash != ZERO_HASH or genesis.records
+        if (genesis.index != 0 or genesis.timestamp != "2026-01-01T00:00:00.000Z"
+                or genesis.previous_hash != ZERO_HASH or genesis.records
                 or genesis.schema_version != SCHEMA_VERSION):
             return {"valid": False, "error_block_index": 0, "error_record_id": None,
                     "reason": "INVALID_GENESIS: нарушены обязательные поля genesis-блока"}
